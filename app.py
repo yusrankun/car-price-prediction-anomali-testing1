@@ -1,120 +1,101 @@
 import streamlit as st
-import streamlit.components.v1 as stc
-import numpy as np
 import pandas as pd
-import pickle
-
-# ==============================
-# Load trained XGBoost model
-with open('xgboost_model.pkl', 'rb') as file:
-    model = pickle.load(file)
-
+import numpy as np
 import joblib
-feature_names = joblib.load('feature_names.pkl')
 
-# ==============================
-# UI Layout
-html_temp = """
-<div style="background-color:#000;padding:10px;border-radius:10px">
-    <h1 style="color:#fff;text-align:center">Car Price Prediction App</h1> 
-    <h4 style="color:#fff;text-align:center">Built with XGBoost</h4> 
-</div>
-"""
+# Load model, scaler, dan fitur
+model = joblib.load("xgboost_model.pkl")
+scaler = joblib.load("scaler.pkl")
+feature_names = joblib.load("feature_names.pkl")  # X.columns.tolist() saat training
 
-desc_temp = """
-### Car Price Prediction App
-This app predicts the estimated price of a used car.
+# Daftar fitur numerik (harus cocok dengan training)
+numeric_cols = [
+    'Levy', 'Prod. year', 'Engine volume', 'Mileage', 'Cylinders',
+    'Doors', 'Wheel', 'volume_per_cylinder', 'car_age',
+    'Mileage_Age_Interaction', 'Mileage_bin', 'Volume_Turbo', 'Model_encoded'
+]
 
-#### Notes:
-- All inputs are based on cleaned features
-- The model used is XGBoost Regressor
-"""
+def preprocess_input(user_input):
+    df = user_input.copy()
 
-# ==============================
-# Sidebar menu
-def main():
-    stc.html(html_temp)
-    menu = ["Home", "Predict Price"]
-    choice = st.sidebar.selectbox("Menu", menu)
+    # Handle Turbo
+    df['Has Turbo'] = df['Engine volume'].astype(str).str.contains('Turbo', case=False)
+    df['Engine volume'] = df['Engine volume'].astype(str).str.replace(' Turbo', '', regex=False)
+    df['Engine volume'] = pd.to_numeric(df['Engine volume'], errors='coerce')
 
-    if choice == "Home":
-        st.markdown(desc_temp, unsafe_allow_html=True)
-    elif choice == "Predict Price":
-        run_prediction_app()
+    # Feature Engineering
+    df['volume_per_cylinder'] = df['Engine volume'] / df['Cylinders']
+    df['car_age'] = 2025 - df['Prod. year']
+    df['Mileage_Age_Interaction'] = df['Mileage'] / (df['car_age'] + 1)
+    df['Mileage_bin'] = pd.cut(df['Mileage'], bins=4, labels=False)
+    df['Volume_Turbo'] = df['Engine volume'] * df['Has Turbo'].astype(int)
 
-# ==============================
-# Input form and prediction
+    # Model_encoded (pakai mean Price dummy, bisa diganti default 0 jika tidak tersedia)
+    df['Model_encoded'] = 0
+
+    # Rare Encoding tidak perlu di sini karena saat dummies nanti fitur disamakan
+
+    # Convert binary
+    df['Leather interior'] = df['Leather interior'].map({'Yes': True, 'No': False})
+    df['Wheel'] = df['Wheel'].map({'Left wheel': 0, 'Right-hand drive': 1})
+
+    # One-hot encoding
+    df = pd.get_dummies(df, drop_first=False)
+
+    # Reindex supaya cocok dengan training features
+    df = df.reindex(columns=feature_names, fill_value=0)
+
+    # Scaling
+    df[numeric_cols] = scaler.transform(df[numeric_cols])
+
+    return df
+
 def run_prediction_app():
-    st.subheader("Input Car Features")
+    st.title("Car Price Prediction App 🚗")
 
-    col1, col2 = st.columns(2)
+    # Input form
+    with st.form("car_input_form"):
+        Manufacturer = st.selectbox("Manufacturer", ['Toyota', 'Mercedes-Benz', 'BMW', 'Ford', 'Rare'])
+        Category = st.selectbox("Category", ['Sedan', 'Jeep', 'Hatchback', 'Microbus', 'Rare'])
+        Fuel_type = st.selectbox("Fuel Type", ['Petrol', 'Diesel', 'Hybrid', 'Electric', 'Rare'])
+        Gear_box = st.selectbox("Gear Box", ['Automatic', 'Manual', 'Tiptronic', 'Variator', 'Rare'])
+        Drive_wheels = st.selectbox("Drive Wheels", ['Front', 'Rear', '4x4', 'Rare'])
 
-    # Sample user inputs
-    levy = col1.number_input("Levy", value=0)
-    mileage = col2.number_input("Mileage (km)", value=100000)
-    prod_year = col1.slider("Production Year", 1995, 2025, 2015)
-    engine_volume = col2.slider("Engine Volume (L)", 0.8, 6.5, 2.0)
-    cylinders = col1.slider("Cylinders", 2, 16, 4)
-    doors = col2.selectbox("Doors", [3, 5, 6])
-    leather = col1.selectbox("Leather Interior", ["Yes", "No"])
-    wheel = col2.selectbox("Wheel (Driving Side)", ["Left", "Right"])
-    has_turbo = col1.selectbox("Has Turbo?", ["Yes", "No"])
-    drive = col2.selectbox("Drive Wheels", ['Front', 'Rear', 'All'])
-    fuel_gear = col1.selectbox("Fuel + Gear Type", ['Petrol_Automatic', 'Diesel_Manual', 'Rare'])
-    model_encoded = col2.slider("Model Mean Price Encoding", 5000, 100000, 20000)
+        Levy = st.number_input("Levy", min_value=0.0, value=0.0)
+        Prod_year = st.number_input("Production Year", min_value=1950, max_value=2025, value=2015)
+        Engine_volume = st.text_input("Engine Volume (e.g. 2.0 or 2.0 Turbo)", "2.0")
+        Mileage = st.number_input("Mileage (in km)", min_value=0, value=100000)
+        Cylinders = st.number_input("Number of Cylinders", min_value=1, max_value=16, value=4)
+        Doors = st.selectbox("Doors", [3, 5, 6])
+        Leather = st.selectbox("Leather Interior", ['Yes', 'No'])
+        Wheel = st.selectbox("Steering Wheel", ['Left wheel', 'Right-hand drive'])
 
-    # Prediction button
-    if st.button("Predict"):
-        # Preprocess input
-        features = preprocess_input(
-            levy, mileage, prod_year, engine_volume, cylinders, doors,
-            leather, wheel, has_turbo, drive, fuel_gear, model_encoded
-        )
+        submitted = st.form_submit_button("Predict")
 
-        input_df = pd.DataFrame([features])
+    if submitted:
+        user_input = pd.DataFrame([{
+            'Manufacturer': Manufacturer,
+            'Category': Category,
+            'Fuel type': Fuel_type,
+            'Gear box type': Gear_box,
+            'Drive wheels': Drive_wheels,
+            'Levy': Levy,
+            'Prod. year': Prod_year,
+            'Engine volume': Engine_volume,
+            'Mileage': Mileage,
+            'Cylinders': Cylinders,
+            'Doors': Doors,
+            'Leather interior': Leather,
+            'Wheel': Wheel,
+        }])
 
-        # Predict
+        input_df = preprocess_input(user_input)
         prediction = model.predict(input_df)[0]
-        st.success(f"Estimated Car Price: ${int(prediction):,}")
 
-# ==============================
-# Feature preprocessing (match model input)
-def preprocess_input(levy, mileage, prod_year, engine_volume, cylinders, doors,
-                     leather, wheel, has_turbo, drive, fuel_gear, model_encoded):
+        st.success(f"Estimated Car Price: ${prediction:,.2f}")
 
-    car_age = 2025 - prod_year
-    mileage_age_interaction = mileage / (car_age + 1)
-    volume_per_cylinder = engine_volume / cylinders
-    volume_turbo = engine_volume * (1 if has_turbo == "Yes" else 0)
-    mileage_bin = pd.cut([mileage], bins=4, labels=False)[0]
+def main():
+    run_prediction_app()
 
-    # Encode categoricals
-    leather_binary = 1 if leather == "Yes" else 0
-    wheel_binary = 1 if wheel == "Right" else 0
-    has_turbo_binary = 1 if has_turbo == "Yes" else 0
-    drive_encoded = {"Front": 0, "Rear": 1, "All": 2}.get(drive, 0)
-    fuel_gear_encoded = {"Petrol_Automatic": 0, "Diesel_Manual": 1, "Rare": 2}.get(fuel_gear, 2)
-
-    return {
-        'Levy': levy,
-        'Mileage': mileage,
-        'Prod. year': prod_year,
-        'Engine volume': engine_volume,
-        'Cylinders': cylinders,
-        'Doors': doors,
-        'car_age': car_age,
-        'Mileage_Age_Interaction': mileage_age_interaction,
-        'Model_encoded': model_encoded,
-        'volume_per_cylinder': volume_per_cylinder,
-        'Volume_Turbo': volume_turbo,
-        'Mileage_bin': mileage_bin,
-        'Leather interior': leather_binary,
-        'Wheel': wheel_binary,
-        'Has Turbo': has_turbo_binary,
-        'Drive wheels': drive_encoded,
-        'fuel_gear': fuel_gear_encoded
-    }
-
-# ==============================
 if __name__ == "__main__":
     main()
