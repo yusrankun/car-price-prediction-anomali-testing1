@@ -1,113 +1,117 @@
 import streamlit as st
 import streamlit.components.v1 as stc
-import pandas as pd
 import numpy as np
+import pandas as pd
 import pickle
 
-# Load pre-trained CatBoost model
+# ==============================
+# Load trained XGBoost model
 with open('xgboost_model.pkl', 'rb') as file:
     model = pickle.load(file)
 
-html_temp = """<div style="background-color:#000;padding:10px;border-radius:10px">
-                <h1 style="color:#fff;text-align:center">Car Price Prediction App</h1> 
-                <h4 style="color:#fff;text-align:center">Powered by Machine Learning</h4> 
-               </div>"""
-
-desc_temp = """### Car Price Prediction App
-This app predicts the price of a used car based on input features.
-
-#### Data Source
-Kaggle (Car Price Prediction dataset)
+# ==============================
+# UI Layout
+html_temp = """
+<div style="background-color:#000;padding:10px;border-radius:10px">
+    <h1 style="color:#fff;text-align:center">Car Price Prediction App</h1> 
+    <h4 style="color:#fff;text-align:center">Built with XGBoost</h4> 
+</div>
 """
 
-# Main Streamlit App
+desc_temp = """
+### Car Price Prediction App
+This app predicts the estimated price of a used car.
+
+#### Notes:
+- All inputs are based on cleaned features
+- The model used is XGBoost Regressor
+"""
+
+# ==============================
+# Sidebar menu
 def main():
     stc.html(html_temp)
-    menu = ["Home", "Price Predictor"]
+    menu = ["Home", "Predict Price"]
     choice = st.sidebar.selectbox("Menu", menu)
 
     if choice == "Home":
-        st.subheader("Home")
         st.markdown(desc_temp, unsafe_allow_html=True)
-    elif choice == "Price Predictor":
+    elif choice == "Predict Price":
         run_prediction_app()
 
-# Prediction Form
+# ==============================
+# Input form and prediction
 def run_prediction_app():
-    st.subheader("Car Details Input")
+    st.subheader("Input Car Features")
 
     col1, col2 = st.columns(2)
 
-    manufacturer = col1.selectbox("Manufacturer", ['Toyota', 'BMW', 'Mercedes-Benz', 'Rare'])
-    category = col2.selectbox("Category", ['Sedan', 'Jeep', 'Hatchback', 'Rare'])
-    fuel_type = col1.selectbox("Fuel Type", ['Petrol', 'Diesel', 'Hybrid', 'Electric', 'Rare'])
-    gear_box = col2.selectbox("Gear Box Type", ['Automatic', 'Manual', 'Tiptronic', 'CVT', 'Rare'])
-    drive_wheels = col1.selectbox("Drive Wheels", ['Front', 'Rear', 'All', 'Rare'])
-
-    prod_year = col2.slider("Production Year", 1995, 2025, 2015)
-    engine_volume = col1.slider("Engine Volume (L)", 0.8, 6.5, 2.0)
-    cylinders = col2.slider("Cylinders", 2, 16, 4)
-    turbo = col1.selectbox("Has Turbo?", ["Yes", "No"])
-    mileage = col2.number_input("Mileage (km)", value=100000)
+    # Sample user inputs
     levy = col1.number_input("Levy", value=0)
+    mileage = col2.number_input("Mileage (km)", value=100000)
+    prod_year = col1.slider("Production Year", 1995, 2025, 2015)
+    engine_volume = col2.slider("Engine Volume (L)", 0.8, 6.5, 2.0)
+    cylinders = col1.slider("Cylinders", 2, 16, 4)
     doors = col2.selectbox("Doors", [3, 5, 6])
     leather = col1.selectbox("Leather Interior", ["Yes", "No"])
-    wheel = col2.selectbox("Wheel Position", ["Left", "Right"])
-    model_encoded = col1.slider("Model Mean Price (Encoding)", 5000, 80000, 20000)
+    wheel = col2.selectbox("Wheel (Driving Side)", ["Left", "Right"])
+    has_turbo = col1.selectbox("Has Turbo?", ["Yes", "No"])
+    drive = col2.selectbox("Drive Wheels", ['Front', 'Rear', 'All'])
+    fuel_gear = col1.selectbox("Fuel + Gear Type", ['Petrol_Automatic', 'Diesel_Manual', 'Rare'])
+    model_encoded = col2.slider("Model Mean Price Encoding", 5000, 100000, 20000)
 
-    # Predict Button
-    if st.button("Predict Price"):
-        features = preprocess_input(manufacturer, category, fuel_type, gear_box, drive_wheels,
-                                    prod_year, engine_volume, cylinders, turbo, mileage,
-                                    levy, doors, leather, wheel, model_encoded)
+    # Prediction button
+    if st.button("Predict"):
+        # Preprocess input
+        features = preprocess_input(
+            levy, mileage, prod_year, engine_volume, cylinders, doors,
+            leather, wheel, has_turbo, drive, fuel_gear, model_encoded
+        )
 
-        prediction = model.predict(np.array([features]))[0]
+        input_df = pd.DataFrame([features])
+
+        # Predict
+        prediction = model.predict(input_df)[0]
         st.success(f"Estimated Car Price: ${int(prediction):,}")
 
-# Preprocessing user input for prediction
-def preprocess_input(manufacturer, category, fuel_type, gear_box, drive_wheels,
-                     prod_year, engine_volume, cylinders, turbo, mileage,
-                     levy, doors, leather, wheel, model_encoded):
+# ==============================
+# Feature preprocessing (match model input)
+def preprocess_input(levy, mileage, prod_year, engine_volume, cylinders, doors,
+                     leather, wheel, has_turbo, drive, fuel_gear, model_encoded):
 
     car_age = 2025 - prod_year
-    has_turbo = 1 if turbo == "Yes" else 0
-    volume_per_cylinder = engine_volume / cylinders
     mileage_age_interaction = mileage / (car_age + 1)
-    volume_turbo = engine_volume * has_turbo
-    fuel_gear = fuel_type + "_" + gear_box
+    volume_per_cylinder = engine_volume / cylinders
+    volume_turbo = engine_volume * (1 if has_turbo == "Yes" else 0)
     mileage_bin = pd.cut([mileage], bins=4, labels=False)[0]
 
-    # Encoding categorical variables manually
-    def encode_cat(value, mapping):
-        return mapping.get(value, mapping['Rare'])
+    # Encode categoricals
+    leather_binary = 1 if leather == "Yes" else 0
+    wheel_binary = 1 if wheel == "Right" else 0
+    has_turbo_binary = 1 if has_turbo == "Yes" else 0
+    drive_encoded = {"Front": 0, "Rear": 1, "All": 2}.get(drive, 0)
+    fuel_gear_encoded = {"Petrol_Automatic": 0, "Diesel_Manual": 1, "Rare": 2}.get(fuel_gear, 2)
 
-    manu_map = {'Toyota': 0, 'BMW': 1, 'Mercedes-Benz': 2, 'Rare': 3}
-    cat_map = {'Sedan': 0, 'Jeep': 1, 'Hatchback': 2, 'Rare': 3}
-    fuel_gear_map = {'Petrol_Automatic': 0, 'Diesel_Manual': 1, 'Rare': 2}
-    drive_map = {'Front': 0, 'Rear': 1, 'All': 2, 'Rare': 3}
+    return {
+        'Levy': levy,
+        'Mileage': mileage,
+        'Prod. year': prod_year,
+        'Engine volume': engine_volume,
+        'Cylinders': cylinders,
+        'Doors': doors,
+        'car_age': car_age,
+        'Mileage_Age_Interaction': mileage_age_interaction,
+        'Model_encoded': model_encoded,
+        'volume_per_cylinder': volume_per_cylinder,
+        'Volume_Turbo': volume_turbo,
+        'Mileage_bin': mileage_bin,
+        'Leather interior': leather_binary,
+        'Wheel': wheel_binary,
+        'Has Turbo': has_turbo_binary,
+        'Drive wheels': drive_encoded,
+        'fuel_gear': fuel_gear_encoded
+    }
 
-    encoded = [
-        levy,
-        mileage,
-        prod_year,
-        engine_volume,
-        cylinders,
-        doors,
-        car_age,
-        mileage_age_interaction,
-        model_encoded,
-        volume_per_cylinder,
-        volume_turbo,
-        mileage_bin if not pd.isna(mileage_bin) else 0,
-        encode_cat(manufacturer, manu_map),
-        encode_cat(category, cat_map),
-        1 if leather == "Yes" else 0,
-        1 if wheel == "Right" else 0,
-        has_turbo,
-        encode_cat(drive_wheels, drive_map),
-        encode_cat(fuel_gear, fuel_gear_map)
-    ]
-    return encoded
-
-if __name__ == '__main__':
+# ==============================
+if __name__ == "__main__":
     main()
