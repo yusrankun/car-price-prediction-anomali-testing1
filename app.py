@@ -9,6 +9,9 @@ import pickle
 with open('xgboost_model.pkl', 'rb') as file:
     model = pickle.load(file)
 
+import joblib
+feature_names = joblib.load('feature_names.pkl')
+
 # ==============================
 # UI Layout
 html_temp = """
