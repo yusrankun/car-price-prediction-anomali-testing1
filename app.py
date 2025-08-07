@@ -61,7 +61,6 @@ def run_prediction_app():
                                     prod_year, engine_volume, cylinders, turbo, mileage,
                                     levy, doors, leather, wheel, model_encoded)
 
-        import numpy as np
         prediction = model.predict(np.array([features]))[0]
         st.success(f"Estimated Car Price: ${int(prediction):,}")
 
