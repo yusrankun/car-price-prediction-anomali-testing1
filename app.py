@@ -5,7 +5,7 @@ import numpy as np
 import pickle
 
 # Load pre-trained CatBoost model
-with open('XGBoost_Model.pkl', 'rb') as file:
+with open('xgboost_model.pkl', 'rb') as file:
     model = pickle.load(file)
 
 html_temp = """<div style="background-color:#000;padding:10px;border-radius:10px">
